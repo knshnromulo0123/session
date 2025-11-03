@@ -78,6 +78,18 @@ try {
     // success
     login_user($user);
 
+    // Ensure a simple user id is present in session for other APIs
+    init_session(); // make sure session is active after login_user
+    $normalizedId = $user['user_id'] ?? $user['id'] ?? $user['userId'] ?? $user['userID'] ?? null;
+    if ($normalizedId !== null) {
+        // store a simple integer id at $_SESSION['user_id'] for compatibility
+        $_SESSION['user_id'] = (int)$normalizedId;
+        // also ensure the nested user id stays consistent
+        if (!empty($_SESSION['user'])) {
+            $_SESSION['user']['id'] = (int)$normalizedId;
+        }
+    }
+
     if (wants_json()) {
         header('Content-Type: application/json');
         $display = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')) ?: ($user['username'] ?? $user['email'] ?? '');

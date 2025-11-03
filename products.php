@@ -97,7 +97,7 @@ init_session();
                   <div class="card-body">
                     <h5 class="card-title"><?= $name ?></h5>
                     <p class="card-text text-muted mb-2"><?= $price ?></p>
-                    <a href="#" class="btn btn-primary w-100">Add to Cart</a>
+                    <a href="#" class="btn btn-primary w-100 add-to-cart" data-id="<?= $p['product_id'] ?>" data-name="<?= $name ?>" data-price="<?= htmlspecialchars((float)$p['product_price']) ?>" data-image="<?= $img ?>">Add to Cart</a>
                   </div>
                 </div>
               </div>
@@ -126,7 +126,7 @@ init_session();
                 <div class="card-body">
                   <h5 class="card-title"><?= $name ?></h5>
                   <p class="card-text text-muted mb-2"><?= $price ?></p>
-                  <a href="#" class="btn btn-primary w-100">Add to Cart</a>
+                  <a href="#" class="btn btn-primary w-100 add-to-cart" data-id="<?= $p['product_id'] ?>" data-name="<?= $name ?>" data-price="<?= htmlspecialchars((float)$p['product_price']) ?>" data-image="<?= $img ?>">Add to Cart</a>
                 </div>
               </div>
             </div>
@@ -152,7 +152,7 @@ init_session();
                 <div class="card-body">
                   <h5 class="card-title"><?= $name ?></h5>
                   <p class="card-text text-muted mb-2"><?= $price ?></p>
-                  <a href="#" class="btn btn-primary w-100">Add to Cart</a>
+                  <a href="#" class="btn btn-primary w-100 add-to-cart" data-id="<?= $p['product_id'] ?>" data-name="<?= $name ?>" data-price="<?= htmlspecialchars((float)$p['product_price']) ?>" data-image="<?= $img ?>">Add to Cart</a>
                 </div>
               </div>
             </div>
@@ -178,7 +178,7 @@ init_session();
                 <div class="card-body">
                   <h5 class="card-title"><?= $name ?></h5>
                   <p class="card-text text-muted mb-2"><?= $price ?></p>
-                  <a href="#" class="btn btn-primary w-100">Add to Cart</a>
+                  <a href="#" class="btn btn-primary w-100 add-to-cart" data-id="<?= $p['product_id'] ?>" data-name="<?= $name ?>" data-price="<?= htmlspecialchars((float)$p['product_price']) ?>" data-image="<?= $img ?>">Add to Cart</a>
                 </div>
               </div>
             </div>
@@ -300,18 +300,61 @@ init_session();
       // Add click handlers to all "Add to Cart" buttons (only those inside product cards)
       $('.card .btn-primary').click(function(e) {
         e.preventDefault();
-        const card = $(this).closest('.card');
-        const name = card.find('.card-title').text();
-        const priceText = card.find('.card-text').text().replace('₱', '').replace(',', '');
-        const price = parseFloat(priceText);
-        const image = card.find('img').attr('src');
-        
+        const btn = $(this);
+
+        // prefer data attributes if available (added to the anchor in PHP)
+        const productId = btn.data('id');
+        const name = btn.data('name') || btn.closest('.card').find('.card-title').text();
+        const price = parseFloat(btn.data('price')) || parseFloat(btn.closest('.card').find('.card-text').text().replace('₱', '').replace(/,/g, '')) || 0;
+        const image = btn.data('image') || btn.closest('.card').find('img').attr('src');
+
+        // Keep localStorage fallback for offline UX
         addToCart(name, price, image);
-        
-        // Show success message
-        $(this).text('Added!').removeClass('btn-primary').addClass('btn-success');
+
+        // Send add-to-cart request to server (relative path, no leading slash)
+        $.post('add_to_cart.php', { product_id: productId, quantity: 1 })
+          .done(function(resp) {
+              if (resp && resp.success) {
+                // sync server-side item_id into localStorage cart
+                try {
+                  const serverItem = resp.item;
+                  let local = JSON.parse(localStorage.getItem('jeweluxe_cart')) || [];
+                  // try to find by product_id
+                  let found = local.find(it => (it.product_id && serverItem && serverItem.product_id && it.product_id == serverItem.product_id) || (it.name === name));
+                  if (found) {
+                    found.item_id = serverItem.item_id || found.item_id;
+                    found.quantity = serverItem.quantity || found.quantity || 1;
+                  } else {
+                    local.push({
+                      item_id: serverItem.item_id || null,
+                      product_id: serverItem.product_id || productId || null,
+                      name: serverItem.name || name,
+                      price: parseFloat(serverItem.price) || price,
+                      image: serverItem.image || image,
+                      quantity: serverItem.quantity || 1,
+                      sku: (serverItem.name || name).replace(/\s+/g, '').toUpperCase()
+                    });
+                  }
+                  localStorage.setItem('jeweluxe_cart', JSON.stringify(local));
+                } catch (e) {
+                  console.error('Failed to sync cart with server response', e, resp);
+                }
+                showCartNotification(name + ' added to cart!');
+              } else {
+                const msg = resp && resp.message ? resp.message : 'Could not add to cart.';
+                showCartNotification('Server error: ' + msg);
+                console.error('Add to cart response error:', resp);
+              }
+            })
+          .fail(function(xhr, status, err) {
+            showCartNotification('Server error adding to cart');
+            console.error('Add to cart AJAX failed:', status, err, xhr.responseText);
+          });
+
+        // Visual feedback on the button
+        btn.text('Added!').removeClass('btn-primary').addClass('btn-success');
         setTimeout(() => {
-          $(this).text('Add to Cart').removeClass('btn-success').addClass('btn-primary');
+          btn.text('Add to Cart').removeClass('btn-success').addClass('btn-primary');
         }, 1500);
       });
 

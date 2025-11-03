@@ -122,9 +122,49 @@ init_session();
   <!-- Cart Functionality -->
   <script>
     $(document).ready(function() {
-      // Initialize cart from localStorage
-      let cart = JSON.parse(localStorage.getItem('jeweluxe_cart')) || [];
-      
+      // Initialize cart (we try server-side first, then fallback to localStorage)
+      let cart = [];
+
+      function useLocalCart() {
+        cart = JSON.parse(localStorage.getItem('jeweluxe_cart')) || [];
+        displayCart();
+      }
+
+      // Try fetching server-side cart (works when user is logged in). If that fails or returns empty, fall back to localStorage.
+      $.get('get_cart.php')
+        .done(function(resp) {
+          try {
+            // get_cart.php returns { success: true, cart: { items: [...] } }
+            const items = resp && resp.cart && Array.isArray(resp.cart.items) ? resp.cart.items : [];
+            if (resp && resp.success && items.length > 0) {
+              // Map server items into the local shape used by the UI, preserving cart_item id
+              cart = items.map(function(it) {
+                return {
+                  item_id: it.item_id ? parseInt(it.item_id) : (it.itemId ? parseInt(it.itemId) : null),
+                  product_id: it.product_id || it.productId || null,
+                  name: it.name || it.product_name || it.productName || '',
+                  price: parseFloat(it.price) || parseFloat(it.product_price) || 0,
+                  image: it.image || it.product_image || 'image/placeholder.png',
+                  quantity: parseInt(it.quantity || it.qty || 1) || 1,
+                  sku: it.sku || ''
+                };
+              });
+              // Keep a localStorage mirror for offline UX
+              localStorage.setItem('jeweluxe_cart', JSON.stringify(cart));
+              displayCart();
+            } else {
+              useLocalCart();
+            }
+          } catch (e) {
+            console.error('Error parsing server cart response', e, resp);
+            useLocalCart();
+          }
+        })
+        .fail(function() {
+          // server-side not available or user not logged in — use localStorage
+          useLocalCart();
+        });
+
       // Display cart items
       function displayCart() {
         if (cart.length === 0) {
@@ -143,7 +183,7 @@ init_session();
         let subtotal = 0;
         
         cart.forEach(function(item, index) {
-          subtotal += item.price;
+          subtotal += (item.price || 0) * (item.quantity || 1);
           cartHtml += `
             <div class="card mb-3">
               <div class="card-body">
@@ -198,16 +238,69 @@ init_session();
         if (cart[index].quantity < 1) {
           cart[index].quantity = 1;
         }
-        
-        localStorage.setItem('jeweluxe_cart', JSON.stringify(cart));
-        updateCartDisplay();
+
+        // If this item exists on server (has item_id), update server as well
+        const item = cart[index];
+        if (item && item.item_id) {
+          $.post('update_cart.php', { item_id: item.item_id, quantity: item.quantity })
+            .done(function(resp) {
+              if (resp && resp.success) {
+                // reflect any canonical quantity from server
+                item.quantity = resp.quantity || item.quantity;
+                localStorage.setItem('jeweluxe_cart', JSON.stringify(cart));
+                updateCartDisplay();
+              } else {
+                console.error('Failed to update cart on server', resp);
+                // fallback: still update locally
+                localStorage.setItem('jeweluxe_cart', JSON.stringify(cart));
+                updateCartDisplay();
+              }
+            })
+            .fail(function(xhr, status, err) {
+              console.error('update_cart.php request failed', status, err, xhr.responseText);
+              // fallback to local update
+              localStorage.setItem('jeweluxe_cart', JSON.stringify(cart));
+              updateCartDisplay();
+            });
+        } else {
+          // local-only item
+          localStorage.setItem('jeweluxe_cart', JSON.stringify(cart));
+          updateCartDisplay();
+        }
       };
       
       // Remove from cart
       window.removeFromCart = function(index) {
-        cart.splice(index, 1);
-        localStorage.setItem('jeweluxe_cart', JSON.stringify(cart));
-        displayCart();
+        const item = cart[index];
+        if (item && item.item_id) {
+          // ask server to remove
+          $.post('remove_from_cart.php', { item_id: item.item_id })
+            .done(function(resp) {
+              if (resp && resp.success) {
+                cart.splice(index, 1);
+                localStorage.setItem('jeweluxe_cart', JSON.stringify(cart));
+                displayCart();
+              } else {
+                console.error('Server failed to remove item', resp);
+                // still remove locally to keep UX responsive
+                cart.splice(index, 1);
+                localStorage.setItem('jeweluxe_cart', JSON.stringify(cart));
+                displayCart();
+              }
+            })
+            .fail(function(xhr, status, err) {
+              console.error('remove_from_cart.php request failed', status, err, xhr.responseText);
+              // fallback: remove locally
+              cart.splice(index, 1);
+              localStorage.setItem('jeweluxe_cart', JSON.stringify(cart));
+              displayCart();
+            });
+        } else {
+          // local-only item
+          cart.splice(index, 1);
+          localStorage.setItem('jeweluxe_cart', JSON.stringify(cart));
+          displayCart();
+        }
       };
       
       // Initialize display

@@ -1,21 +1,12 @@
 <?php
-// Simple session helpers for the project
-// Usage: require_once __DIR__ . '/includes/auth.php'; then call init_session();
-
-/**
- * Initialize session safely.
- * Returns true when a session is active or was successfully started.
- * Returns false when headers already sent and session could not be (re)configured.
- */
 function init_session(): bool {
     if (session_status() !== PHP_SESSION_NONE) {
         return true;
     }
 
-    // If headers already sent we cannot set cookie params; try to start session anyway
+
     if (headers_sent()) {
-        // Attempt to start session but suppress warnings — it will fail if headers already sent
-        // Return false if session still isn't active.
+
         @session_start();
         return session_status() === PHP_SESSION_ACTIVE;
     }
@@ -59,7 +50,7 @@ function current_user(): ?array {
 
 function logout_user(): void {
     init_session();
-    // Unset all session variables
+
     $_SESSION = [];
     // Delete session cookie
     if (ini_get('session.use_cookies')) {
